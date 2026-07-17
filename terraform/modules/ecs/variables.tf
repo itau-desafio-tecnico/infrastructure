@@ -58,6 +58,10 @@ variable "sns_topic_arn" {
   type = string
 }
 
+variable "otel_collector_endpoint" {
+  type = string
+}
+
 variable "order_service_image" {
   type    = string
   default = ""

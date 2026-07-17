@@ -228,6 +228,8 @@ resource "aws_ecs_task_definition" "order_service" {
         { name = "DB_NAME", value = "orders" },
         { name = "REQUESTER_SERVICE_URL", value = "http://requester-service.${var.service_discovery_namespace_name}:8081/jv-requester-service" },
         { name = "SNS_TOPIC_ARN", value = var.sns_topic_arn },
+        { name = "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", value = var.otel_collector_endpoint },
+        { name = "OTEL_EXPORTER_OTLP_METRICS_ENDPOINT", value = replace(var.otel_collector_endpoint, "/v1/traces", "/v1/metrics") },
       ]
       secrets = [
         { name = "DB_USER", valueFrom = "${var.order_db_secret_arn}:username::" },
@@ -298,6 +300,7 @@ resource "aws_ecs_task_definition" "requester_service" {
         { name = "DB_HOST", value = var.requester_db_endpoint },
         { name = "DB_PORT", value = "5432" },
         { name = "DB_NAME", value = "requesters" },
+        { name = "OTLP_COLLECTOR_ENDPOINT", value = var.otel_collector_endpoint },
       ]
       secrets = [
         { name = "DB_USER", valueFrom = "${var.requester_db_secret_arn}:username::" },

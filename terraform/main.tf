@@ -44,6 +44,10 @@ resource "aws_service_discovery_private_dns_namespace" "internal" {
   vpc  = module.network.vpc_id
 }
 
+locals {
+  otel_collector_endpoint = "http://otel-collector.${aws_service_discovery_private_dns_namespace.internal.name}:4318/v1/traces"
+}
+
 module "ecs" {
   source = "./modules/ecs"
 
@@ -66,10 +70,27 @@ module "ecs" {
   requester_db_secret_arn  = module.database.requester_db_secret_arn
 
   sns_topic_arn            = module.messaging.sns_topic_arn
+  otel_collector_endpoint  = local.otel_collector_endpoint
 
   order_service_image      = var.order_service_image
   requester_service_image  = var.requester_service_image
 
   order_service_desired_count     = var.order_service_desired_count
   requester_service_desired_count = var.requester_service_desired_count
+}
+
+module "observability" {
+  source = "./modules/observability"
+
+  name_prefix = local.name_prefix
+  aws_region  = var.aws_region
+
+  vpc_id             = module.network.vpc_id
+  private_subnet_ids = module.network.private_subnet_ids
+  ecs_tasks_sg_id    = module.security.ecs_tasks_sg_id
+  ecs_cluster_id     = aws_ecs_cluster.this.id
+  alb_arn            = module.ecs.alb_arn
+
+  service_discovery_namespace_id   = aws_service_discovery_private_dns_namespace.internal.id
+  service_discovery_namespace_name = aws_service_discovery_private_dns_namespace.internal.name
 }

@@ -1,5 +1,11 @@
 output "alb_dns_name" {
-  value = module.ecs.alb_dns_name
+  description = "Base URL dos servicos (/py-order-service*, /jv-requester-service*), Grafana (:3000) e Jaeger (:16686)"
+  value       = module.ecs.alb_dns_name
+}
+
+output "grafana_admin_secret_arn" {
+  description = "Secret no Secrets Manager com a senha do usuario admin do Grafana"
+  value       = module.observability.grafana_admin_secret_arn
 }
 
 output "ecs_cluster_name" {

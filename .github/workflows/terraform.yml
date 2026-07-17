@@ -42,6 +42,4 @@ jobs:
       - name: Terraform Apply
         working-directory: ./terraform
         run: |
-            terraform apply -auto-approve -input=false \
-                -var "order_service_image"=${{ secrets.ORDER_SERVICE_IMAGE }} \
-                -var "requester_service_image"=${{ secrets.REQUESTER_SERVICE_IMAGE }}
+            terraform apply -auto-approve -input=false

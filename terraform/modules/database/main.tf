@@ -76,7 +76,8 @@ resource "aws_db_instance" "requester" {
 }
 
 resource "aws_secretsmanager_secret" "order_db" {
-  name = "${var.name_prefix}/order-service/db"
+  name                    = "${var.name_prefix}/order-service/db"
+  recovery_window_in_days = 0
 }
 
 resource "aws_secretsmanager_secret_version" "order_db" {
@@ -91,7 +92,8 @@ resource "aws_secretsmanager_secret_version" "order_db" {
 }
 
 resource "aws_secretsmanager_secret" "requester_db" {
-  name = "${var.name_prefix}/requester-service/db"
+  name                    = "${var.name_prefix}/requester-service/db"
+  recovery_window_in_days = 0
 }
 
 resource "aws_secretsmanager_secret_version" "requester_db" {
