@@ -1,6 +1,7 @@
 resource "aws_ecr_repository" "order_service" {
   name                 = "${var.name_prefix}-order-service"
   image_tag_mutability = "MUTABLE"
+  force_delete         = true
 
   image_scanning_configuration {
     scan_on_push = true
@@ -10,6 +11,17 @@ resource "aws_ecr_repository" "order_service" {
 resource "aws_ecr_repository" "requester_service" {
   name                 = "${var.name_prefix}-requester-service"
   image_tag_mutability = "MUTABLE"
+  force_delete         = true
+
+  image_scanning_configuration {
+    scan_on_push = true
+  }
+}
+
+resource "aws_ecr_repository" "order_service_migration" {
+  name                 = "${var.name_prefix}-order-service-migration"
+  image_tag_mutability = "MUTABLE"
+  force_delete         = true
 
   image_scanning_configuration {
     scan_on_push = true
@@ -32,7 +44,7 @@ resource "aws_lb_target_group" "order_service" {
   target_type = "ip"
 
   health_check {
-    path                = "/health"
+    path                = "/py-order-service/health"
     healthy_threshold   = 2
     unhealthy_threshold = 3
     interval            = 15
@@ -48,7 +60,7 @@ resource "aws_lb_target_group" "requester_service" {
   target_type = "ip"
 
   health_check {
-    path                = "/actuator/health"
+    path                = "/jv-requester-service/actuator/health"
     healthy_threshold   = 2
     unhealthy_threshold = 3
     interval            = 15
@@ -82,7 +94,7 @@ resource "aws_lb_listener_rule" "order_service" {
 
   condition {
     path_pattern {
-      values = ["/orders*", "/health"]
+      values = ["/py-order-service/*"]
     }
   }
 }
@@ -98,7 +110,7 @@ resource "aws_lb_listener_rule" "requester_service" {
 
   condition {
     path_pattern {
-      values = ["/requesters*", "/actuator*"]
+      values = ["/jv-requester-service/*"]
     }
   }
 }
@@ -185,9 +197,15 @@ resource "aws_cloudwatch_log_group" "requester_service" {
   retention_in_days = 14
 }
 
+resource "aws_cloudwatch_log_group" "order_service_migration" {
+  name              = "/ecs/${var.name_prefix}/order-service-migration"
+  retention_in_days = 14
+}
+
 locals {
-  order_service_image     = var.order_service_image != "" ? var.order_service_image : "${aws_ecr_repository.order_service.repository_url}:latest"
-  requester_service_image = var.requester_service_image != "" ? var.requester_service_image : "${aws_ecr_repository.requester_service.repository_url}:latest"
+  order_service_image           = var.order_service_image != "" ? var.order_service_image : "${aws_ecr_repository.order_service.repository_url}:latest"
+  requester_service_image       = var.requester_service_image != "" ? var.requester_service_image : "${aws_ecr_repository.requester_service.repository_url}:latest"
+  order_service_migration_image = "${aws_ecr_repository.order_service_migration.repository_url}:latest"
 }
 
 resource "aws_ecs_task_definition" "order_service" {
@@ -208,8 +226,10 @@ resource "aws_ecs_task_definition" "order_service" {
       environment = [
         { name = "DB_HOST", value = var.order_db_endpoint },
         { name = "DB_NAME", value = "orders" },
-        { name = "REQUESTER_SERVICE_URL", value = "http://requester-service.${var.service_discovery_namespace_name}:8081" },
+        { name = "REQUESTER_SERVICE_URL", value = "http://requester-service.${var.service_discovery_namespace_name}:8081/jv-requester-service" },
         { name = "SNS_TOPIC_ARN", value = var.sns_topic_arn },
+        { name = "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", value = var.otel_collector_endpoint },
+        { name = "OTEL_EXPORTER_OTLP_METRICS_ENDPOINT", value = replace(var.otel_collector_endpoint, "/v1/traces", "/v1/metrics") },
       ]
       secrets = [
         { name = "DB_USER", valueFrom = "${var.order_db_secret_arn}:username::" },
@@ -221,6 +241,40 @@ resource "aws_ecs_task_definition" "order_service" {
           "awslogs-group"         = aws_cloudwatch_log_group.order_service.name
           "awslogs-region"        = var.aws_region
           "awslogs-stream-prefix" = "order-service"
+        }
+      }
+    }
+  ])
+}
+
+resource "aws_ecs_task_definition" "order_service_migration" {
+  family                   = "${var.name_prefix}-order-service-migration"
+  requires_compatibilities = ["FARGATE"]
+  network_mode             = "awsvpc"
+  cpu                      = "256"
+  memory                   = "512"
+  execution_role_arn       = aws_iam_role.execution.arn
+
+  container_definitions = jsonencode([
+    {
+      name      = "order-service-migration"
+      image     = local.order_service_migration_image
+      essential = true
+      command   = ["update"]
+      environment = [
+        { name = "LIQUIBASE_COMMAND_URL", value = "jdbc:postgresql://${var.order_db_endpoint}:5432/orders" },
+        { name = "LIQUIBASE_COMMAND_CHANGELOG_FILE", value = "changelog/db.changelog-master.yaml" },
+      ]
+      secrets = [
+        { name = "LIQUIBASE_COMMAND_USERNAME", valueFrom = "${var.order_db_secret_arn}:username::" },
+        { name = "LIQUIBASE_COMMAND_PASSWORD", valueFrom = "${var.order_db_secret_arn}:password::" },
+      ]
+      logConfiguration = {
+        logDriver = "awslogs"
+        options = {
+          "awslogs-group"         = aws_cloudwatch_log_group.order_service_migration.name
+          "awslogs-region"        = var.aws_region
+          "awslogs-stream-prefix" = "order-service-migration"
         }
       }
     }
@@ -244,7 +298,9 @@ resource "aws_ecs_task_definition" "requester_service" {
       portMappings = [{ containerPort = 8081, protocol = "tcp" }]
       environment = [
         { name = "DB_HOST", value = var.requester_db_endpoint },
+        { name = "DB_PORT", value = "5432" },
         { name = "DB_NAME", value = "requesters" },
+        { name = "OTLP_COLLECTOR_ENDPOINT", value = var.otel_collector_endpoint },
       ]
       secrets = [
         { name = "DB_USER", valueFrom = "${var.requester_db_secret_arn}:username::" },
@@ -312,11 +368,12 @@ resource "aws_ecs_service" "order_service" {
 }
 
 resource "aws_ecs_service" "requester_service" {
-  name            = "requester-service"
-  cluster         = var.ecs_cluster_id
-  task_definition = aws_ecs_task_definition.requester_service.arn
-  desired_count   = var.requester_service_desired_count
-  launch_type     = "FARGATE"
+  name                              = "requester-service"
+  cluster                           = var.ecs_cluster_id
+  task_definition                   = aws_ecs_task_definition.requester_service.arn
+  desired_count                     = var.requester_service_desired_count
+  launch_type                       = "FARGATE"
+  health_check_grace_period_seconds = 120
 
   network_configuration {
     subnets         = var.private_subnet_ids

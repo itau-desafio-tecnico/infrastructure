@@ -18,7 +18,7 @@ provider "aws" {
 
   default_tags {
     tags = {
-      Project     = "desafio-tecnico-itau"
+      Project     = "desafio-itau"
       ManagedBy   = "terraform"
       Environment = var.environment
     }

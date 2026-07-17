@@ -36,6 +36,4 @@ jobs:
       - name: Terraform Destroy
         working-directory: ./terraform
         run: |
-            terraform destroy -auto-approve -input=false \
-                -var "order_service_image"=${{ secrets.ORDER_SERVICE_IMAGE }} \
-                -var "requester_service_image"=${{ secrets.REQUESTER_SERVICE_IMAGE }}
+            terraform destroy -auto-approve -input=false
