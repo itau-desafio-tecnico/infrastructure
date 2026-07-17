@@ -1,0 +1,337 @@
+resource "aws_ecr_repository" "order_service" {
+  name                 = "${var.name_prefix}-order-service"
+  image_tag_mutability = "MUTABLE"
+
+  image_scanning_configuration {
+    scan_on_push = true
+  }
+}
+
+resource "aws_ecr_repository" "requester_service" {
+  name                 = "${var.name_prefix}-requester-service"
+  image_tag_mutability = "MUTABLE"
+
+  image_scanning_configuration {
+    scan_on_push = true
+  }
+}
+
+resource "aws_lb" "this" {
+  name               = "${var.name_prefix}-alb"
+  internal           = false
+  load_balancer_type = "application"
+  security_groups    = [var.alb_sg_id]
+  subnets            = var.public_subnet_ids
+}
+
+resource "aws_lb_target_group" "order_service" {
+  name        = "${var.name_prefix}-order-svc-tg"
+  port        = 8000
+  protocol    = "HTTP"
+  vpc_id      = var.vpc_id
+  target_type = "ip"
+
+  health_check {
+    path                = "/health"
+    healthy_threshold   = 2
+    unhealthy_threshold = 3
+    interval            = 15
+    timeout             = 5
+  }
+}
+
+resource "aws_lb_target_group" "requester_service" {
+  name        = "${var.name_prefix}-requester-svc-tg"
+  port        = 8081
+  protocol    = "HTTP"
+  vpc_id      = var.vpc_id
+  target_type = "ip"
+
+  health_check {
+    path                = "/actuator/health"
+    healthy_threshold   = 2
+    unhealthy_threshold = 3
+    interval            = 15
+    timeout             = 5
+  }
+}
+
+resource "aws_lb_listener" "http" {
+  load_balancer_arn = aws_lb.this.arn
+  port              = 80
+  protocol          = "HTTP"
+
+  default_action {
+    type = "fixed-response"
+    fixed_response {
+      content_type = "text/plain"
+      message_body = "not found"
+      status_code  = "404"
+    }
+  }
+}
+
+resource "aws_lb_listener_rule" "order_service" {
+  listener_arn = aws_lb_listener.http.arn
+  priority     = 100
+
+  action {
+    type             = "forward"
+    target_group_arn = aws_lb_target_group.order_service.arn
+  }
+
+  condition {
+    path_pattern {
+      values = ["/orders*", "/health"]
+    }
+  }
+}
+
+resource "aws_lb_listener_rule" "requester_service" {
+  listener_arn = aws_lb_listener.http.arn
+  priority     = 200
+
+  action {
+    type             = "forward"
+    target_group_arn = aws_lb_target_group.requester_service.arn
+  }
+
+  condition {
+    path_pattern {
+      values = ["/requesters*", "/actuator*"]
+    }
+  }
+}
+
+resource "aws_iam_role" "execution" {
+  name = "${var.name_prefix}-ecs-execution"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect    = "Allow"
+      Principal = { Service = "ecs-tasks.amazonaws.com" }
+      Action    = "sts:AssumeRole"
+    }]
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "execution_managed" {
+  role       = aws_iam_role.execution.name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
+}
+
+resource "aws_iam_role_policy" "execution_secrets" {
+  name = "${var.name_prefix}-ecs-execution-secrets"
+  role = aws_iam_role.execution.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect   = "Allow"
+      Action   = ["secretsmanager:GetSecretValue"]
+      Resource = [var.order_db_secret_arn, var.requester_db_secret_arn]
+    }]
+  })
+}
+
+resource "aws_iam_role" "order_service_task" {
+  name = "${var.name_prefix}-order-service-task"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect    = "Allow"
+      Principal = { Service = "ecs-tasks.amazonaws.com" }
+      Action    = "sts:AssumeRole"
+    }]
+  })
+}
+
+resource "aws_iam_role_policy" "order_service_sns" {
+  name = "${var.name_prefix}-order-service-sns-publish"
+  role = aws_iam_role.order_service_task.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect   = "Allow"
+      Action   = ["sns:Publish"]
+      Resource = [var.sns_topic_arn]
+    }]
+  })
+}
+
+resource "aws_iam_role" "requester_service_task" {
+  name = "${var.name_prefix}-requester-service-task"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect    = "Allow"
+      Principal = { Service = "ecs-tasks.amazonaws.com" }
+      Action    = "sts:AssumeRole"
+    }]
+  })
+}
+
+resource "aws_cloudwatch_log_group" "order_service" {
+  name              = "/ecs/${var.name_prefix}/order-service"
+  retention_in_days = 14
+}
+
+resource "aws_cloudwatch_log_group" "requester_service" {
+  name              = "/ecs/${var.name_prefix}/requester-service"
+  retention_in_days = 14
+}
+
+locals {
+  order_service_image     = var.order_service_image != "" ? var.order_service_image : "${aws_ecr_repository.order_service.repository_url}:latest"
+  requester_service_image = var.requester_service_image != "" ? var.requester_service_image : "${aws_ecr_repository.requester_service.repository_url}:latest"
+}
+
+resource "aws_ecs_task_definition" "order_service" {
+  family                   = "${var.name_prefix}-order-service"
+  requires_compatibilities = ["FARGATE"]
+  network_mode             = "awsvpc"
+  cpu                      = "256"
+  memory                   = "512"
+  execution_role_arn       = aws_iam_role.execution.arn
+  task_role_arn            = aws_iam_role.order_service_task.arn
+
+  container_definitions = jsonencode([
+    {
+      name      = "order-service"
+      image     = local.order_service_image
+      essential = true
+      portMappings = [{ containerPort = 8000, protocol = "tcp" }]
+      environment = [
+        { name = "DB_HOST", value = var.order_db_endpoint },
+        { name = "DB_NAME", value = "orders" },
+        { name = "REQUESTER_SERVICE_URL", value = "http://requester-service.${var.service_discovery_namespace_name}:8081" },
+        { name = "SNS_TOPIC_ARN", value = var.sns_topic_arn },
+      ]
+      secrets = [
+        { name = "DB_USER", valueFrom = "${var.order_db_secret_arn}:username::" },
+        { name = "DB_PASSWORD", valueFrom = "${var.order_db_secret_arn}:password::" },
+      ]
+      logConfiguration = {
+        logDriver = "awslogs"
+        options = {
+          "awslogs-group"         = aws_cloudwatch_log_group.order_service.name
+          "awslogs-region"        = var.aws_region
+          "awslogs-stream-prefix" = "order-service"
+        }
+      }
+    }
+  ])
+}
+
+resource "aws_ecs_task_definition" "requester_service" {
+  family                   = "${var.name_prefix}-requester-service"
+  requires_compatibilities = ["FARGATE"]
+  network_mode             = "awsvpc"
+  cpu                      = "512"
+  memory                   = "1024"
+  execution_role_arn       = aws_iam_role.execution.arn
+  task_role_arn            = aws_iam_role.requester_service_task.arn
+
+  container_definitions = jsonencode([
+    {
+      name      = "requester-service"
+      image     = local.requester_service_image
+      essential = true
+      portMappings = [{ containerPort = 8081, protocol = "tcp" }]
+      environment = [
+        { name = "DB_HOST", value = var.requester_db_endpoint },
+        { name = "DB_NAME", value = "requesters" },
+      ]
+      secrets = [
+        { name = "DB_USER", valueFrom = "${var.requester_db_secret_arn}:username::" },
+        { name = "DB_PASSWORD", valueFrom = "${var.requester_db_secret_arn}:password::" },
+      ]
+      logConfiguration = {
+        logDriver = "awslogs"
+        options = {
+          "awslogs-group"         = aws_cloudwatch_log_group.requester_service.name
+          "awslogs-region"        = var.aws_region
+          "awslogs-stream-prefix" = "requester-service"
+        }
+      }
+    }
+  ])
+}
+
+resource "aws_service_discovery_service" "order_service" {
+  name = "order-service"
+
+  dns_config {
+    namespace_id = var.service_discovery_namespace_id
+    dns_records {
+      ttl  = 10
+      type = "A"
+    }
+  }
+}
+
+resource "aws_service_discovery_service" "requester_service" {
+  name = "requester-service"
+
+  dns_config {
+    namespace_id = var.service_discovery_namespace_id
+    dns_records {
+      ttl  = 10
+      type = "A"
+    }
+  }
+}
+
+resource "aws_ecs_service" "order_service" {
+  name            = "order-service"
+  cluster         = var.ecs_cluster_id
+  task_definition = aws_ecs_task_definition.order_service.arn
+  desired_count   = var.order_service_desired_count
+  launch_type     = "FARGATE"
+
+  network_configuration {
+    subnets         = var.private_subnet_ids
+    security_groups = [var.ecs_tasks_sg_id]
+  }
+
+  load_balancer {
+    target_group_arn = aws_lb_target_group.order_service.arn
+    container_name   = "order-service"
+    container_port   = 8000
+  }
+
+  service_registries {
+    registry_arn = aws_service_discovery_service.order_service.arn
+  }
+
+  depends_on = [aws_lb_listener_rule.order_service]
+}
+
+resource "aws_ecs_service" "requester_service" {
+  name            = "requester-service"
+  cluster         = var.ecs_cluster_id
+  task_definition = aws_ecs_task_definition.requester_service.arn
+  desired_count   = var.requester_service_desired_count
+  launch_type     = "FARGATE"
+
+  network_configuration {
+    subnets         = var.private_subnet_ids
+    security_groups = [var.ecs_tasks_sg_id]
+  }
+
+  load_balancer {
+    target_group_arn = aws_lb_target_group.requester_service.arn
+    container_name   = "requester-service"
+    container_port   = 8081
+  }
+
+  service_registries {
+    registry_arn = aws_service_discovery_service.requester_service.arn
+  }
+
+  depends_on = [aws_lb_listener_rule.requester_service]
+}

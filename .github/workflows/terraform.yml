@@ -1,0 +1,47 @@
+name: Deploy infra AWS with terraform
+
+on:
+  workflow_dispatch:
+
+jobs:
+  terraform:
+    name: Create AWS infrastructure with Terraform
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.13.3
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: sa-east-1
+
+      - name: Terraform Init
+        working-directory: ./terraform
+        run: terraform init -reconfigure
+
+      - name: Terraform Validate
+        working-directory: ./terraform
+        run: terraform validate
+
+      - name: Terraform Plan
+        working-directory: ./terraform
+        run: |
+            terraform plan -input=false \
+                -var "order_service_image"=${{ secrets.ORDER_SERVICE_IMAGE }} \
+                -var "requester_service_image"=${{ secrets.REQUESTER_SERVICE_IMAGE }}
+
+      - name: Terraform Apply
+        working-directory: ./terraform
+        run: |
+            terraform apply -auto-approve -input=false \
+                -var "order_service_image"=${{ secrets.ORDER_SERVICE_IMAGE }} \
+                -var "requester_service_image"=${{ secrets.REQUESTER_SERVICE_IMAGE }}

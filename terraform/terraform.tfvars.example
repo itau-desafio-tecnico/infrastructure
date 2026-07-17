@@ -1,0 +1,15 @@
+# Copie para terraform.tfvars e ajuste conforme necessario.
+# Nao commitar terraform.tfvars com valores reais sensiveis.
+
+aws_region  = "sa-east-1"
+environment = "dev"
+
+# Deixe em branco na primeira apply (o ECR ainda nao tem imagem);
+# o pipeline de CI/CD atualiza a task definition apos o primeiro build.
+order_service_image     = ""
+requester_service_image = ""
+
+order_service_desired_count     = 1
+requester_service_desired_count = 1
+
+db_instance_class = "db.t4g.micro"
