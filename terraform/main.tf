@@ -14,6 +14,8 @@ module "security" {
 
   name_prefix = local.name_prefix
   vpc_id      = module.network.vpc_id
+
+  depends_on = [module.network]
 }
 
 module "database" {
@@ -23,4 +25,12 @@ module "database" {
   private_subnet_ids = module.network.private_subnet_ids
   rds_sg_id          = module.security.rds_sg_id
   db_instance_class  = var.db_instance_class
+
+  depends_on = [module.network, module.security]
+}
+
+module "messaging" {
+  source = "./modules/messaging"
+
+  name_prefix = local.name_prefix
 }
