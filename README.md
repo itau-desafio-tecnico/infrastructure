@@ -1,6 +1,6 @@
 # infrastructure
 
-Infraestrutura como código (**Terraform**) que provisiona, na AWS, todo o ambiente de execução dos microsserviços [`order-service`](../order-service/README.md) e [`requester-service`](../requester-service/README.md): rede, banco de dados, mensageria, cluster ECS Fargate com load balancer e a stack de observabilidade (métricas, tracing e dashboards).
+Infraestrutura como código (**Terraform**) que provisiona, na AWS, todo o ambiente de execução dos microsserviços [`order-service`](https://github.com/itau-desafio-tecnico/order-service/blob/main/README.md) e [`requester-service`](https://github.com/itau-desafio-tecnico/requester-service/blob/main/README.md): rede, banco de dados, mensageria, cluster ECS Fargate com load balancer e a stack de observabilidade (métricas, tracing e dashboards).
 
 ## Sumário
 
