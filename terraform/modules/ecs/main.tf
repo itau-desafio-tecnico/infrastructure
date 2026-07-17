@@ -41,7 +41,7 @@ resource "aws_lb_target_group" "order_service" {
   target_type = "ip"
 
   health_check {
-    path                = "/health"
+    path                = "/py-order-service/health"
     healthy_threshold   = 2
     unhealthy_threshold = 3
     interval            = 15
@@ -57,7 +57,7 @@ resource "aws_lb_target_group" "requester_service" {
   target_type = "ip"
 
   health_check {
-    path                = "/actuator/health"
+    path                = "/jv-requester-service/actuator/health"
     healthy_threshold   = 2
     unhealthy_threshold = 3
     interval            = 15
@@ -91,7 +91,7 @@ resource "aws_lb_listener_rule" "order_service" {
 
   condition {
     path_pattern {
-      values = ["/orders*", "/health"]
+      values = ["/py-order-service/*"]
     }
   }
 }
@@ -107,7 +107,7 @@ resource "aws_lb_listener_rule" "requester_service" {
 
   condition {
     path_pattern {
-      values = ["/requesters*", "/actuator*"]
+      values = ["/jv-requester-service/*"]
     }
   }
 }
@@ -223,7 +223,7 @@ resource "aws_ecs_task_definition" "order_service" {
       environment = [
         { name = "DB_HOST", value = var.order_db_endpoint },
         { name = "DB_NAME", value = "orders" },
-        { name = "REQUESTER_SERVICE_URL", value = "http://requester-service.${var.service_discovery_namespace_name}:8081" },
+        { name = "REQUESTER_SERVICE_URL", value = "http://requester-service.${var.service_discovery_namespace_name}:8081/jv-requester-service" },
         { name = "SNS_TOPIC_ARN", value = var.sns_topic_arn },
       ]
       secrets = [
