@@ -16,6 +16,15 @@ resource "aws_ecr_repository" "requester_service" {
   }
 }
 
+resource "aws_ecr_repository" "order_service_migration" {
+  name                 = "${var.name_prefix}-order-service-migration"
+  image_tag_mutability = "MUTABLE"
+
+  image_scanning_configuration {
+    scan_on_push = true
+  }
+}
+
 resource "aws_lb" "this" {
   name               = "${var.name_prefix}-alb"
   internal           = false
@@ -185,9 +194,15 @@ resource "aws_cloudwatch_log_group" "requester_service" {
   retention_in_days = 14
 }
 
+resource "aws_cloudwatch_log_group" "order_service_migration" {
+  name              = "/ecs/${var.name_prefix}/order-service-migration"
+  retention_in_days = 14
+}
+
 locals {
-  order_service_image     = var.order_service_image != "" ? var.order_service_image : "${aws_ecr_repository.order_service.repository_url}:latest"
-  requester_service_image = var.requester_service_image != "" ? var.requester_service_image : "${aws_ecr_repository.requester_service.repository_url}:latest"
+  order_service_image           = var.order_service_image != "" ? var.order_service_image : "${aws_ecr_repository.order_service.repository_url}:latest"
+  requester_service_image       = var.requester_service_image != "" ? var.requester_service_image : "${aws_ecr_repository.requester_service.repository_url}:latest"
+  order_service_migration_image = "${aws_ecr_repository.order_service_migration.repository_url}:latest"
 }
 
 resource "aws_ecs_task_definition" "order_service" {
@@ -227,6 +242,40 @@ resource "aws_ecs_task_definition" "order_service" {
   ])
 }
 
+resource "aws_ecs_task_definition" "order_service_migration" {
+  family                   = "${var.name_prefix}-order-service-migration"
+  requires_compatibilities = ["FARGATE"]
+  network_mode             = "awsvpc"
+  cpu                      = "256"
+  memory                   = "512"
+  execution_role_arn       = aws_iam_role.execution.arn
+
+  container_definitions = jsonencode([
+    {
+      name      = "order-service-migration"
+      image     = local.order_service_migration_image
+      essential = true
+      command   = ["update"]
+      environment = [
+        { name = "LIQUIBASE_COMMAND_URL", value = "jdbc:postgresql://${var.order_db_endpoint}:5432/orders" },
+        { name = "LIQUIBASE_COMMAND_CHANGELOG_FILE", value = "changelog/db.changelog-master.yaml" },
+      ]
+      secrets = [
+        { name = "LIQUIBASE_COMMAND_USERNAME", valueFrom = "${var.order_db_secret_arn}:username::" },
+        { name = "LIQUIBASE_COMMAND_PASSWORD", valueFrom = "${var.order_db_secret_arn}:password::" },
+      ]
+      logConfiguration = {
+        logDriver = "awslogs"
+        options = {
+          "awslogs-group"         = aws_cloudwatch_log_group.order_service_migration.name
+          "awslogs-region"        = var.aws_region
+          "awslogs-stream-prefix" = "order-service-migration"
+        }
+      }
+    }
+  ])
+}
+
 resource "aws_ecs_task_definition" "requester_service" {
   family                   = "${var.name_prefix}-requester-service"
   requires_compatibilities = ["FARGATE"]
@@ -244,6 +293,7 @@ resource "aws_ecs_task_definition" "requester_service" {
       portMappings = [{ containerPort = 8081, protocol = "tcp" }]
       environment = [
         { name = "DB_HOST", value = var.requester_db_endpoint },
+        { name = "DB_PORT", value = "5432" },
         { name = "DB_NAME", value = "requesters" },
       ]
       secrets = [
@@ -312,11 +362,12 @@ resource "aws_ecs_service" "order_service" {
 }
 
 resource "aws_ecs_service" "requester_service" {
-  name            = "requester-service"
-  cluster         = var.ecs_cluster_id
-  task_definition = aws_ecs_task_definition.requester_service.arn
-  desired_count   = var.requester_service_desired_count
-  launch_type     = "FARGATE"
+  name                              = "requester-service"
+  cluster                           = var.ecs_cluster_id
+  task_definition                   = aws_ecs_task_definition.requester_service.arn
+  desired_count                     = var.requester_service_desired_count
+  launch_type                       = "FARGATE"
+  health_check_grace_period_seconds = 120
 
   network_configuration {
     subnets         = var.private_subnet_ids
