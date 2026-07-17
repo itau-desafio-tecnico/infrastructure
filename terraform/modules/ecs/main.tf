@@ -1,6 +1,7 @@
 resource "aws_ecr_repository" "order_service" {
   name                 = "${var.name_prefix}-order-service"
   image_tag_mutability = "MUTABLE"
+  force_delete         = true
 
   image_scanning_configuration {
     scan_on_push = true
@@ -10,6 +11,7 @@ resource "aws_ecr_repository" "order_service" {
 resource "aws_ecr_repository" "requester_service" {
   name                 = "${var.name_prefix}-requester-service"
   image_tag_mutability = "MUTABLE"
+  force_delete         = true
 
   image_scanning_configuration {
     scan_on_push = true
@@ -19,6 +21,7 @@ resource "aws_ecr_repository" "requester_service" {
 resource "aws_ecr_repository" "order_service_migration" {
   name                 = "${var.name_prefix}-order-service-migration"
   image_tag_mutability = "MUTABLE"
+  force_delete         = true
 
   image_scanning_configuration {
     scan_on_push = true
