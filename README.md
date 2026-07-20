@@ -50,7 +50,7 @@ network ──► security ──► database ──┐
 | [`security`](terraform/modules/security) | Security Groups: `alb` (80, 3000 Grafana, 16686 Jaeger, público), `ecs_tasks` (tráfego do ALB + tráfego interno entre containers) e `rds` (5432 apenas a partir do `ecs_tasks`) |
 | [`database`](terraform/modules/database) | Duas instâncias RDS PostgreSQL 16 (`order` e `requester`), subnet group privado, senhas geradas via `random_password` e armazenadas no Secrets Manager |
 | [`messaging`](terraform/modules/messaging) | Tópico SNS `order-created`, fila SQS `order-processing` com DLQ (`maxReceiveCount=5`) inscrita no tópico |
-| [`ecs`](terraform/modules/ecs) | 3 repositórios ECR (`order-service`, `requester-service`, `order-service-migration`), ALB com listener HTTP:80 e roteamento por path, task definitions/serviços Fargate dos dois microsserviços, roles IAM (execução + task role de cada serviço), service discovery (Cloud Map) e log groups no CloudWatch |
+| [`ecs`](terraform/modules/ecs) | 3 repositórios ECR (`order-service`, `requester-service`, `order-service-migration`), ALB com listener HTTP:80 e roteamento por path, task definitions/serviços Fargate dos dois microsserviços, Application Auto Scaling (target tracking por CPU), roles IAM (execução + task role de cada serviço), service discovery (Cloud Map) e log groups no CloudWatch |
 | [`observability`](terraform/modules/observability) | OTel Collector, Prometheus, Jaeger e Grafana, cada um como serviço Fargate próprio, registrados no mesmo namespace de service discovery (`internal.local`) |
 
 Além dos módulos, o root também cria diretamente o `aws_ecs_cluster` e o namespace de service discovery privado (`aws_service_discovery_private_dns_namespace`, `internal.local`), compartilhados por todos os serviços.
@@ -110,9 +110,19 @@ Variáveis do módulo raiz (`terraform/variables.tf`), configuráveis via `terra
 | `vpc_cidr` | `10.0.0.0/16` | CIDR da VPC |
 | `order_service_image` | `""` | URI da imagem Docker do `order-service`; vazio na primeira aplicação, atualizado pelo pipeline de CI/CD |
 | `requester_service_image` | `""` | URI da imagem Docker do `requester-service`; idem |
-| `order_service_desired_count` | `1` | Réplicas desejadas do `order-service` |
-| `requester_service_desired_count` | `1` | Réplicas desejadas do `requester-service` |
+| `order_service_desired_count` | `1` | Réplicas iniciais do `order-service` (depois do primeiro apply, o Application Auto Scaling assume o controle desse número) |
+| `requester_service_desired_count` | `1` | Réplicas iniciais do `requester-service` (idem) |
+| `order_service_min_capacity` / `order_service_max_capacity` | `1` / `4` | Faixa de réplicas do Application Auto Scaling do `order-service` |
+| `order_service_cpu_target_value` | `70` | CPU média alvo (%) da política de target tracking do `order-service` |
+| `requester_service_min_capacity` / `requester_service_max_capacity` | `1` / `4` | Faixa de réplicas do Application Auto Scaling do `requester-service` |
+| `requester_service_cpu_target_value` | `70` | CPU média alvo (%) da política de target tracking do `requester-service` |
 | `db_instance_class` | `db.t4g.micro` | Classe das instâncias RDS |
+
+### Escalabilidade horizontal
+
+Os dois serviços escalam via **Application Auto Scaling** (`aws_appautoscaling_target` + `aws_appautoscaling_policy`, target tracking pela métrica `ECSServiceAverageCPUUtilization`) — quando a CPU média das tasks passa do alvo configurado, o número de tasks aumenta automaticamente até `max_capacity`; quando cai, reduz até `min_capacity`. Os serviços ECS (`aws_ecs_service`) usam `lifecycle { ignore_changes = [desired_count] }` para que o Terraform não sobrescreva, a cada apply, o número de réplicas decidido pelo autoscaler.
+
+Escalar o `order-service` horizontalmente é seguro em relação à publicação de eventos: o `OutboxDispatcher` usa um claim pattern (`SELECT ... FOR UPDATE SKIP LOCKED`) para que múltiplas instâncias dividam o trabalho de publicar no SNS sem duplicar eventos — ver [README do order-service](https://github.com/itau-desafio-tecnico/order-service/blob/main/README.md#fluxos) e [ADR 0004](https://github.com/itau-desafio-tecnico/documentation/blob/main/docs/0004-outbox-pattern.md).
 
 O estado remoto é fixo em `terraform/backend.tf` (bucket `itau-desafio-tecnico-tfstate`, chave `infra/terraform.tfstate`, lock via DynamoDB `itau-desafio-tecnico-terraform-locks`, região `sa-east-1`).
 

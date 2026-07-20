@@ -38,6 +38,42 @@ variable "requester_service_desired_count" {
   default = 1
 }
 
+variable "order_service_min_capacity" {
+  description = "Minimo de tasks do order-service para o Application Auto Scaling"
+  type        = number
+  default     = 1
+}
+
+variable "order_service_max_capacity" {
+  description = "Maximo de tasks do order-service para o Application Auto Scaling"
+  type        = number
+  default     = 4
+}
+
+variable "order_service_cpu_target_value" {
+  description = "CPU media alvo (%) da politica de target tracking do order-service"
+  type        = number
+  default     = 70
+}
+
+variable "requester_service_min_capacity" {
+  description = "Minimo de tasks do requester-service para o Application Auto Scaling"
+  type        = number
+  default     = 1
+}
+
+variable "requester_service_max_capacity" {
+  description = "Maximo de tasks do requester-service para o Application Auto Scaling"
+  type        = number
+  default     = 4
+}
+
+variable "requester_service_cpu_target_value" {
+  description = "CPU media alvo (%) da politica de target tracking do requester-service"
+  type        = number
+  default     = 70
+}
+
 variable "db_instance_class" {
   description = "Class of the RDS instance"
   type        = string

@@ -12,4 +12,14 @@ requester_service_image = ""
 order_service_desired_count     = 1
 requester_service_desired_count = 1
 
+# Application Auto Scaling (target tracking por CPU) - min/max de tasks e
+# percentual de CPU medio alvo de cada servico.
+order_service_min_capacity     = 1
+order_service_max_capacity     = 4
+order_service_cpu_target_value = 70
+
+requester_service_min_capacity     = 1
+requester_service_max_capacity     = 4
+requester_service_cpu_target_value = 70
+
 db_instance_class = "db.t4g.micro"

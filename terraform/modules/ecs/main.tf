@@ -365,6 +365,10 @@ resource "aws_ecs_service" "order_service" {
   }
 
   depends_on = [aws_lb_listener_rule.order_service]
+
+  lifecycle {
+    ignore_changes = [desired_count]
+  }
 }
 
 resource "aws_ecs_service" "requester_service" {
@@ -391,4 +395,66 @@ resource "aws_ecs_service" "requester_service" {
   }
 
   depends_on = [aws_lb_listener_rule.requester_service]
+
+  lifecycle {
+    ignore_changes = [desired_count]
+  }
+}
+
+# ---------------------------------------------------------------------------
+# Application Auto Scaling (target tracking por CPU)
+# ---------------------------------------------------------------------------
+
+locals {
+  ecs_cluster_name = element(split("/", var.ecs_cluster_id), 1)
+}
+
+resource "aws_appautoscaling_target" "order_service" {
+  service_namespace  = "ecs"
+  resource_id        = "service/${local.ecs_cluster_name}/${aws_ecs_service.order_service.name}"
+  scalable_dimension = "ecs:service:DesiredCount"
+  min_capacity       = var.order_service_min_capacity
+  max_capacity       = var.order_service_max_capacity
+}
+
+resource "aws_appautoscaling_policy" "order_service_cpu" {
+  name               = "${var.name_prefix}-order-service-cpu"
+  policy_type        = "TargetTrackingScaling"
+  resource_id        = aws_appautoscaling_target.order_service.resource_id
+  scalable_dimension = aws_appautoscaling_target.order_service.scalable_dimension
+  service_namespace  = aws_appautoscaling_target.order_service.service_namespace
+
+  target_tracking_scaling_policy_configuration {
+    predefined_metric_specification {
+      predefined_metric_type = "ECSServiceAverageCPUUtilization"
+    }
+    target_value       = var.order_service_cpu_target_value
+    scale_in_cooldown  = 60
+    scale_out_cooldown = 60
+  }
+}
+
+resource "aws_appautoscaling_target" "requester_service" {
+  service_namespace  = "ecs"
+  resource_id        = "service/${local.ecs_cluster_name}/${aws_ecs_service.requester_service.name}"
+  scalable_dimension = "ecs:service:DesiredCount"
+  min_capacity       = var.requester_service_min_capacity
+  max_capacity       = var.requester_service_max_capacity
+}
+
+resource "aws_appautoscaling_policy" "requester_service_cpu" {
+  name               = "${var.name_prefix}-requester-service-cpu"
+  policy_type        = "TargetTrackingScaling"
+  resource_id        = aws_appautoscaling_target.requester_service.resource_id
+  scalable_dimension = aws_appautoscaling_target.requester_service.scalable_dimension
+  service_namespace  = aws_appautoscaling_target.requester_service.service_namespace
+
+  target_tracking_scaling_policy_configuration {
+    predefined_metric_specification {
+      predefined_metric_type = "ECSServiceAverageCPUUtilization"
+    }
+    target_value       = var.requester_service_cpu_target_value
+    scale_in_cooldown  = 60
+    scale_out_cooldown = 60
+  }
 }

@@ -81,3 +81,33 @@ variable "requester_service_desired_count" {
   type    = number
   default = 1
 }
+
+variable "order_service_min_capacity" {
+  type    = number
+  default = 1
+}
+
+variable "order_service_max_capacity" {
+  type    = number
+  default = 4
+}
+
+variable "order_service_cpu_target_value" {
+  type    = number
+  default = 70
+}
+
+variable "requester_service_min_capacity" {
+  type    = number
+  default = 1
+}
+
+variable "requester_service_max_capacity" {
+  type    = number
+  default = 4
+}
+
+variable "requester_service_cpu_target_value" {
+  type    = number
+  default = 70
+}
